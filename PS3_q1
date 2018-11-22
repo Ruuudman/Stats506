@@ -1,0 +1,256 @@
+## Problem Set 3, Question 1
+## Stats 506, Fall 2018
+##
+## RECS consumption data is available at:
+## https://www.eia.gov/consumption/residential/data/2015/
+##
+## Author: 'John' Jaehoon Lee
+## Updated: November 6, 2018
+
+# libraries: ------------------------------------------------------------------
+library(data.table)
+library(tidyverse)
+# Multiplier for confidence level: --------------------------------------------
+m = qnorm(.975)
+
+# data: -----------------------------------------------------------------------
+file = './recs2015_public_v3.csv'
+if ( !file.exists(file) ){
+ recs =  readr::read_delim('https://www.eia.gov/consumption/residential/data/2015/csv/recs2015_public_v3.csv',
+                    delim = ',')
+  readr::write_delim(recs, path = file, delim = ',')
+} else {
+  recs = readr::read_delim(file, delim = ',')
+}
+
+#setting recs as data table
+recs=as.data.table(recs)
+
+# Replicate weights: ----------------------------------------------------------
+weights=recs[, c(1,476:571)]
+weights=as.data.table(weights)
+weights_long=melt(weights, id.vars="DOEID", variable.name="repl", value.name="w")
+
+# Division map: ---------------------------------------------------------------
+divisions = c(
+  'New England',
+  'Middle Atlantic',
+  'East North Central',
+  'West North Central',
+  'South Atlantic',
+  'East South Central',
+  'West South Central',
+  'Mountain North',
+  'Mountain South',
+  'Pacific'
+)
+
+############
+## Part a ##
+############
+# Notes: Stucco construction as major outside wall material by Division.
+## Stucco: WALLTYPE == 4
+
+# Point estimate: ------------------------------------------------------------
+p_stucco=recs[,c("DOEID","DIVISION","NWEIGHT","WALLTYPE"),]
+p_stucco[,2]=p_stucco[ , .(division=factor(DIVISION,1:10,divisions))]
+p_stucco=p_stucco[, .(p_stucco=sum(NWEIGHT*{WALLTYPE==4})/sum(NWEIGHT)),by=DIVISION]
+p_stucco=p_stucco[order(-p_stucco)]
+
+# Estimates from replicate weights: -------------------------------------------
+rr=recs[,c("DOEID","DIVISION","NWEIGHT","WALLTYPE"),]
+rr[,2]=rr[ , .(division=factor(DIVISION,1:10,divisions))]
+
+p_stucco_r=weights_long[rr, , on = 'DOEID']
+
+p_stucco_r=p_stucco_r[,.(r_stucco =  sum( w*{WALLTYPE == 4} ) / sum(w)), by=.(DIVISION, repl)]
+
+# Compute standard errors: ----------------------------------------------------
+p_stucco_r=p_stucco_r[p_stucco, , on = 'DIVISION']
+
+p_stucco = p_stucco_r[,.(p_stucco = p_stucco[1],
+             se_stucco = 2 * sqrt( mean( {r_stucco - p_stucco}^2))),by=DIVISION]
+
+p_stucco = p_stucco[,`:=`(lwr = pmax(p_stucco - m*se_stucco, 0), 
+          upr = p_stucco + m*se_stucco
+)]
+p_stucco
+
+############
+## Part b ##
+############
+# Notes: What is the average total kwh of electricity usage by division?
+# By each division Urban and rural subgroups?
+
+# Point estimate: ------------------------------------------------------------
+kwh=recs[,c("DOEID","NWEIGHT","KWH","DIVISION"),]
+kwh[,4]=kwh[ , .(division=factor(DIVISION,1:10,divisions))]
+kwh=kwh[, .(p_kwh=sum(NWEIGHT*KWH)/sum(NWEIGHT)),by=DIVISION]
+kwh=kwh[order(-p_kwh)]
+
+rr=recs[,c("DOEID","DIVISION","NWEIGHT","KWH"),]
+rr[,2]=rr[ , .(division=factor(DIVISION,1:10,divisions))]
+
+kwh_r=weights_long[rr, , on = 'DOEID']
+kwh_r=kwh_r[,.(r_kwh =  sum( w*KWH ) / sum(w)), by=.(DIVISION,repl)]
+
+# Compute standard errors: ----------------------------------------------------
+kwh_r=kwh_r[kwh, , on = 'DIVISION']
+kwh_rr= kwh_r[,.(se_kwh = 2 * sqrt( mean( {r_kwh - p_kwh}^2))),by=DIVISION]
+kwh=kwh[kwh_rr,,on='DIVISION']
+
+kwh= kwh[,`:=`(lwr = pmax(p_kwh - m*se_kwh, 0), 
+          upr = p_kwh + m*se_kwh
+)]
+colnames(kwh)=c("DIVISION","est","se","lwr","upr")
+
+####Urban
+# Point estimate: ------------------------------------------------------------
+kwh_div_urb=recs[,c("DOEID","NWEIGHT","KWH","DIVISION","UATYP10"),]
+kwh_div_urb=kwh_div_urb[,':='(division=factor(DIVISION,1:10,divisions),
+urban=UATYP10%in%c('U','C')),]
+
+kwh_div_urban=kwh_div_urb[kwh_div_urb$urban==TRUE,]
+kwh_div_rural=kwh_div_urb[kwh_div_urb$urban==FALSE,]
+
+kwh_div_urban=kwh_div_urban[,-c("DIVISION","UATYP10","urban"),]
+kwh_div_urban=kwh_div_urban[, .(p_kwh_u=sum(NWEIGHT*KWH)/sum(NWEIGHT)),by=division]
+kwh_div_urban=kwh_div_urban[order(-p_kwh_u)]
+colnames(kwh_div_urban)[1]=c("DIVISION")
+
+kwh_div_rural=kwh_div_rural[,-c("DIVISION","UATYP10","urban"),]
+kwh_div_rural=kwh_div_rural[, .(p_kwh_r=sum(NWEIGHT*KWH)/sum(NWEIGHT)),by=division]
+kwh_div_rural=kwh_div_rural[order(-p_kwh_r)]
+colnames(kwh_div_rural)[1]=c("DIVISION")
+
+rr=recs[,c("DOEID","DIVISION","NWEIGHT","KWH","UATYP10"),]
+rr[,2]=rr[ , .(factor(DIVISION,1:10,divisions))]
+rr[,5]=rr[,.(UATYP10%in%c('U','C'))]
+rr_u=rr[rr$UATYP10==TRUE,]
+rr_r=rr[rr$UATYP10==FALSE,]
+
+# Compute standard errors: ----------------------------------------------------
+kwh_div_urban_r=weights_long[rr_u, , on = 'DOEID']
+kwh_div_urban_r=kwh_div_urban_r[,.(r_kwh_u =  sum( w*KWH ) / sum(w)), by=.(DIVISION,repl)]
+kwh_div_urban_r=kwh_div_urban_r[kwh_div_urban, , on = 'DIVISION']
+kwh_div_urban_rr= kwh_div_urban_r[,.(se_kwh_u = 2 * sqrt( mean( {r_kwh_u - p_kwh_u}^2))),by=DIVISION]
+kwh_div_urban=kwh_div_urban[kwh_div_urban_rr,,on='DIVISION']
+kwh_div_urban= kwh_div_urban[,`:=`(lwr_u = pmax(p_kwh_u - m*se_kwh_u, 0), 
+          upr_u = p_kwh_u + m*se_kwh_u
+)]
+kwh_div_urban
+
+# Compute standard errors: ----------------------------------------------------
+kwh_div_rural_r=weights_long[rr_r, , on = 'DOEID']
+kwh_div_rural_r=kwh_div_rural_r[,.(r_kwh_r =  sum( w*KWH ) / sum(w)), by=.(DIVISION,repl)]
+kwh_div_rural_r=kwh_div_rural_r[kwh_div_rural, , on = 'DIVISION']
+kwh_div_rural_rr= kwh_div_rural_r[,.(se_kwh_r = 2 * sqrt( mean( {r_kwh_r - p_kwh_r}^2))),by=DIVISION]
+kwh_div_rural=kwh_div_rural[kwh_div_rural_rr,,on='DIVISION']
+kwh_div_rural=kwh_div_rural[,`:=`(lwr_r = pmax(p_kwh_r - m*se_kwh_r, 0), 
+          upr_r = p_kwh_r + m*se_kwh_r
+)]
+
+resultb=kwh_div_urban[kwh_div_rural,,on='DIVISION']
+colnames(resultb)=c("DIVISION","est_u","se_u","lwr_u","upr_u"
+,"est_r","se_r","lwr_r","upr_r")
+
+colnames(kwh_div_urban)=c("DIVISION","est","se","lwr","upr")
+colnames(kwh_div_rural)=c("DIVISION","est","se","lwr","upr")
+resultb_u=kwh_div_urban[,':='(urban=TRUE),]
+resultb_r=kwh_div_rural[,':='(urban=FALSE),]
+resultb_p=rbind(resultb_u,resultb_r)
+resultb_p
+
+
+############
+## Part C ##
+############
+
+# Internet access data: -------------------------------------------------------
+internet=recs[,c("DOEID","NWEIGHT","INTERNET","DIVISION","UATYP10"),]
+internet=internet[,':='(x=100*INTERNET,division=factor(DIVISION,1:10,divisions),
+urban=UATYP10%in%c('U','C')),]
+internet=internet[,-c("INTERNET","DIVISION","UATYP10"),]
+internet=internet[,,by=.(division,urban)]
+colnames(internet)[c(2,4)]=c('w','DIVISION')
+
+# Urban/rural estimates for each division: -----------------------------------
+internet_urban=internet[internet$urban==TRUE,]
+internet_rural=internet[internet$urban==FALSE,]
+internet_urban=internet_urban[,-c("urban"),]
+internet_rural=internet_rural[,-c("urban"),]
+internet_urban=internet_urban[, .(p_internet_u=sum(w*x)/sum(w)),by=DIVISION]
+internet_urban=internet_urban[order(-p_internet_u)]
+internet_rural=internet_rural[, .(p_internet_r=sum(w*x)/sum(w)),by=DIVISION]
+internet_rural=internet_rural[order(-p_internet_r)]
+
+
+# Point estimate for difference: ---------------------------------------------
+internet_pe=internet_urban[internet_rural,,on='DIVISION']
+internet_pe=internet_pe[,':='(est=p_internet_u-p_internet_r),by='DIVISION']
+internet_pe=internet_pe[,.(DIVISION,est),]
+internet_pe
+
+# Replicate estimates for difference: ----------------------------------------
+pe_r=internet[,-c('w'),]
+pe_r=pe_r[weights_long,,on='DOEID']
+pe_r_urban=pe_r[pe_r$urban==TRUE,]
+pe_r_rural=pe_r[pe_r$urban==FALSE,]
+pe_r_urban=pe_r_urban[,-c("urban"),]
+pe_r_rural=pe_r_rural[,-c("urban"),]
+pe_r_urban=pe_r_urban[, .(p_pe_r_u=sum(w*x)/sum(w)),by=DIVISION]
+pe_r_urban=pe_r_urban[order(-p_pe_r_u)]
+pe_r_rural=pe_r_rural[, .(p_pe_r_r=sum(w*x)/sum(w)),by=DIVISION]
+pe_r_rural=pe_r_rural[order(-p_pe_r_r)]
+pe_r_pe=pe_r_urban[pe_r_rural,,on='DIVISION']
+pe_r_pe=pe_r_pe[,':='(est=p_pe_r_u-p_pe_r_r),by='DIVISION']
+internet_pe_r=pe_r_pe[,.(DIVISION,est_r=est),]
+
+# Std error and confidence interval for differnce: ---------------------------
+
+internet_pe=internet_pe[internet_pe_r,,on='DIVISION']
+internet_pe=internet_pe[,':='(se=2*sqrt(mean({(est-est_r)}^2))),by=DIVISION]
+internet_pe=internet_pe[,':='(lwr=est-m*se,upr=est+m*se),by=DIVISION]
+
+# Join urban & rural estimates to differences: -------------------------------
+internet_pe=internet_pe[,-c("est_r"),]
+internet_pe
+
+internet_pe_table=internet_pe[,':='(ci=sprintf('%4.1f%% (%4.1f, %4.1f)', est, est - m*se, est + m*se)),]
+internet_pe_table=internet_pe_table[,-c("lwr","upr"),]
+
+
+
+############
+## Part D ##
+############
+
+regions = c(
+  'Northeast',
+  'Midwest',
+  'South',
+  'West'
+)
+
+# Point estimate: ------------------------------------------------------------
+gallon=recs[,c("DOEID","REGIONC","NWEIGHT","GALLONLP"),]
+gallon[,2]=gallon[ , .(factor(REGIONC,1:4,regions))]
+gallon=gallon[, .(p_gallon=sum(NWEIGHT*GALLONLP)/sum(NWEIGHT)),by=REGIONC]
+gallon=gallon[order(-p_gallon)]
+
+rr=recs[,c("DOEID","REGIONC","NWEIGHT","GALLONLP"),]
+rr[,2]=rr[ , .(factor(REGIONC,1:4,regions))]
+
+gallon_r=weights_long[rr, , on = 'DOEID']
+gallon_r=gallon_r[,.(r_gallon =  sum( w*GALLONLP ) / sum(w)), by=.(REGIONC,repl)]
+
+# Compute standard errors: ----------------------------------------------------
+gallon_r=gallon_r[gallon, , on = 'REGIONC']
+gallon_rr= gallon_r[,.(se_gallon = 2 * sqrt( mean( {r_gallon - p_gallon}^2))),by=REGIONC]
+gallon=gallon[gallon_rr,,on='REGIONC']
+
+gallon= gallon[,`:=`(lwr = pmax(p_gallon - m*se_gallon, 0), 
+          upr = p_gallon + m*se_gallon
+)]
+colnames(gallon)=c("REGION","est","se","lwr","upr")
+gallon
