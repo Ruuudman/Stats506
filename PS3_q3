@@ -1,0 +1,106 @@
+################
+#####q3.(a)#####
+################
+
+library(MASS)
+library(data.table)
+mtcars=as.data.table(mtcars)
+mtcars_sort=mtcars[,c("cyl","disp","hp","wt","mpg"),]
+
+beta_coef=mtcars_sort[,':='(dispXmpg=mpg*(disp-mean(disp)),hpXmpg=mpg*(hp-mean(hp)),wtXmpg=mpg*(wt-mean(wt))),cyl]
+beta_coef=beta_coef[,':='(disp_sq=(disp-mean(disp))^2,hp_sq=(hp-mean(hp))^2,wt_sq=(wt-mean(wt))^2),by=cyl]
+beta_coef=beta_coef[,.(dispXmpg=sum(dispXmpg),hpXmpg=sum(hpXmpg),wtXmpg=sum(wtXmpg),disp_sq=sum(disp_sq),hp_sq=sum(hp_sq),wt_sq=sum(wt_sq)),by=cyl]
+beta_coef=beta_coef[,.(disp=dispXmpg/disp_sq,hp=hpXmpg/hp_sq,wt=wtXmpg/wt_sq),by=cyl]
+result_a=beta_coef[order(cyl)]
+result_a
+
+################
+#####q3.(b)#####
+################
+## Part b:----------------------------------------------------------------------
+
+beta_var = function(x, y, group){
+  dt_1 = data.table(X = x, Y = y, Group = group)
+  betas = dt_1[, X_gc := X - mean(X), by = .(Group)] %>%
+    .[, XXmpg := Y*X_gc] %>%
+    .[, X_sq := X_gc*X_gc] %>%
+    .[, .(beta = sum(XXmpg)/sum(X_sq)), by = .(Group)] %>%
+    .[order(Group)]
+  betas
+}
+
+# Get data from part a.
+# Choose variables from mtcars data
+
+cars = read.csv("mtcars.csv")
+dt = as.data.table(cars)
+
+mpg = dt[,mpg]
+disp = dt[,disp]
+hp = dt[,hp]
+wt = dt[,wt]
+cyl=dt[,cyl]
+
+# Test function
+beta_cyl_disp = beta_var(disp, mpg, cyl)
+beta_cyl_hp = beta_var(hp, mpg, cyl)
+beta_cyl_wt = beta_var(wt, mpg, cyl)
+beta_cyl_disp
+beta_cyl_hp=beta_cyl_hp[,2]
+beta_cyl_wt=beta_cyl_wt[,2]
+result_b=data.table(beta_cyl_disp,beta_cyl_hp,beta_cyl_wt)
+colnames(result_b)=c("cyl","disp","hp","wt")
+result_b
+
+################
+#####q3.(c)#####
+################
+# compute the univatiate regression coefficient using 'summarize_at'
+
+library(tidyverse)
+df=data.frame(mtcars)
+
+result_c = df %>% 
+  group_by(cyl) %>% 
+  mutate(disp_gc = disp-mean(disp), hp_gc=hp-mean(hp), wt_gc=wt-mean(wt),
+         dispXmpg = mpg*disp_gc, disp_sq = disp_gc*disp_gc,
+         hpXmpg = mpg*hp_gc, hp_sq = hp_gc*hp_gc,
+         wtXmpg = mpg*wt_gc, wt_sq = wt_gc*wt_gc
+         ) %>%  
+  summarize_at(vars(dispXmpg, hpXmpg, wtXmpg, disp_sq, hp_sq, wt_sq), funs(sum, sum, sum, sum, sum, sum)) %>% 
+  transmute(cyl=cyl, 
+            beta_cyl_disp = dispXmpg_sum / disp_sq_sum, 
+            beta_cyl_hp = hpXmpg_sum / hp_sq_sum, 
+            beta_cyl_wt = wtXmpg_sum / wt_sq_sum)
+colnames(result_c)=c("cyl","disp","hp","wt")
+result_c
+
+################
+#####q3.(d)#####
+################
+
+###Writing a function using dplyr and summarise_at
+library(tidyverse)
+library(data.table)
+beta_x_df=function(a,b,c){
+df=data.frame(A=a,B=b,C=c)%>%
+arrange(C)%>%
+group_by(C)%>%
+mutate(B_gc=B-mean(B),BXa=A*B_gc,B_sq=B_gc*B_gc)%>%
+summarise_at(vars(BXa,B_sq),funs(sum))%>%
+transmute(C=C,beta_C_B=BXa/B_sq)}
+
+###Testing the function
+cars_test=data.frame(mtcars)
+mpg=cars_test[,"mpg"]
+disp=cars_test[,"disp"]
+hp=cars_test[,"hp"]
+wt=cars_test[,"wt"]
+cyl=cars_test[,"cyl"]
+
+beta_cyl_disp=beta_x_df(mpg,disp,cyl)
+beta_cyl_hp=beta_x_df(mpg,hp,cyl)[,2]
+beta_cyl_wt=beta_x_df(mpg,wt,cyl)[,2]
+result_d=data.table(beta_cyl_disp,beta_cyl_hp,beta_cyl_wt)
+colnames(result_d)=c("cyl","disp","hp","wt")
+result_d
